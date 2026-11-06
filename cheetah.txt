@@ -41,6 +41,113 @@ flutter_launcher_icons:
   ios: false
   image_path: "logo.png"
 
+=== FILE: lib/core.dart ===
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+const kOrange = Color(0xFFFF7A00);
+const kBlue = Color(0xFF00B4FF);
+const kBg = Color(0xFF0A0A0A);
+const kCard = Color(0xFF181818);
+
+const tmdbKey = String.fromEnvironment('TMDB_KEY');
+const imgBase = 'https://image.tmdb.org/t/p/';
+
+Future> tmdb(String path,
+    [Map<String, String> q = const {}]) async {
+  final uri = Uri.https('api.themoviedb.org', '/3$path',
+      {'api_key': tmdbKey, 'language': 'en-US', ...q});
+  final r = await http.get(uri);
+  if (r.statusCode != 200) {
+    throw Exception('TMDB error ${r.statusCode}');
+  }
+  return json.decode(r.body) as Map<String, dynamic>;
+}
+
+class Movie {
+  final int id;
+  final String title;
+  final String? poster;
+  final String? backdrop;
+  final double rating;
+  final String year;
+  final String overview;
+
+  Movie({
+    required this.id,
+    required this.title,
+    required this.poster,
+    required this.backdrop,
+    required this.rating,
+    required this.year,
+    required this.overview,
+  });
+
+  factory Movie.fromJson(Map<String, dynamic> j) {
+    final date = (j['release_date'] ?? '') as String;
+    return Movie(
+      id: j['id'] as int,
+      title: (j['title'] ?? j['name'] ?? '') as String,
+      poster: j['poster_path'] as String?,
+      backdrop: j['backdrop_path'] as String?,
+      rating: ((j['vote_average'] ?? 0) as num).toDouble(),
+      year: date.length >= 4 ? date.substring(0, 4) : '',
+      overview: (j['overview'] ?? '') as String,
+    );
+  }
+}
+
+Future<List<Movie>> fetchMovies(String path,
+    [Map<String, String> q = const {}]) async {
+  final d = await tmdb(path, q);
+  return (d['results'] as List)
+      .map((e) => Movie.fromJson(e as Map<String, dynamic>))
+      .where((m) => m.poster != null)
+      .toList();
+}
+
+=== FILE: lib/sources.dart ===
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'core.dart';
+
+class VideoSource {
+  final Map<String, String> streams;
+  final String? download;
+  final bool demo;
+  const VideoSource({required this.streams, this.download, this.demo = false});
+}
+
+/// Vercel Cloud Extractor API Call
+Future<String> getDirectVideoUrl(String rawUrl) async {
+  if (rawUrl.isEmpty) return rawUrl;
+  final apiUri = Uri.parse('https://cheetah-bd.vercel.app/api/get-link?url=${Uri.encodeComponent(rawUrl)}');
+  try {
+    final res = await http.get(apiUri).timeout(const Duration(seconds: 15));
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      if (data['success'] == true && data['direct_url'] != null) {
+        return data['direct_url'];
+      }
+    }
+  } catch (_) {}
+  return rawUrl;
+}
+
+/// ফুল অটোমেটিক সোর্স জেনারেটর (TMDB ID দিয়ে অটো এমবেড লিংক তৈরি হবে)
+VideoSource sourceFor(Movie m) {
+  final autoEmbedUrl = 'https://vidsrc.to/embed/movie/${m.id}';
+  
+  return VideoSource(
+    streams: {
+      'Auto': autoEmbedUrl,
+    },
+    download: autoEmbedUrl,
+    demo: false,
+  );
+}
+
 === FILE: lib/main.dart ===
 import 'dart:async';
 
@@ -51,8 +158,6 @@ import 'core.dart';
 import 'detail.dart';
 import 'downloads.dart';
 import 'update.dart';
-
-// ---------------------------------------------------------------- App
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -200,8 +305,6 @@ class PlaceholderPage extends StatelessWidget {
     );
   }
 }
-
-// ---------------------------------------------------------------- Home
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -419,8 +522,6 @@ void openDetails(BuildContext context, Movie m) {
       .push(MaterialPageRoute(builder: (_) => DetailsPage(movie: m)));
 }
 
-// ---------------------------------------------------------------- Search
-
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
 
@@ -516,139 +617,6 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 }
-
-=== FILE: lib/core.dart ===
-import 'dart:convert';
-
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-
-const kOrange = Color(0xFFFF7A00);
-const kBlue = Color(0xFF00B4FF);
-const kBg = Color(0xFF0A0A0A);
-const kCard = Color(0xFF181818);
-
-const tmdbKey = String.fromEnvironment('TMDB_KEY');
-const imgBase = 'https://image.tmdb.org/t/p/';
-
-Future<Map<String, dynamic>> tmdb(String path,
-    [Map<String, String> q = const {}]) async {
-  final uri = Uri.https('api.themoviedb.org', '/3$path',
-      {'api_key': tmdbKey, 'language': 'en-US', ...q});
-  final r = await http.get(uri);
-  if (r.statusCode != 200) {
-    throw Exception('TMDB error ${r.statusCode}');
-  }
-  return json.decode(r.body) as Map<String, dynamic>;
-}
-
-class Movie {
-  final int id;
-  final String title;
-  final String? poster;
-  final String? backdrop;
-  final double rating;
-  final String year;
-  final String overview;
-
-  Movie({
-    required this.id,
-    required this.title,
-    required this.poster,
-    required this.backdrop,
-    required this.rating,
-    required this.year,
-    required this.overview,
-  });
-
-  factory Movie.fromJson(Map<String, dynamic> j) {
-    final date = (j['release_date'] ?? '') as String;
-    return Movie(
-      id: j['id'] as int,
-      title: (j['title'] ?? j['name'] ?? '') as String,
-      poster: j['poster_path'] as String?,
-      backdrop: j['backdrop_path'] as String?,
-      rating: ((j['vote_average'] ?? 0) as num).toDouble(),
-      year: date.length >= 4 ? date.substring(0, 4) : '',
-      overview: (j['overview'] ?? '') as String,
-    );
-  }
-}
-
-Future<List<Movie>> fetchMovies(String path,
-    [Map<String, String> q = const {}]) async {
-  final d = await tmdb(path, q);
-  return (d['results'] as List)
-      .map((e) => Movie.fromJson(e as Map<String, dynamic>))
-      .where((m) => m.poster != null)
-      .toList();
-}
-
-=== FILE: lib/sources.dart ===
-import 'core.dart';
-
-/// একটা মুভির ভিডিও লিংক।
-/// streams  = কোয়ালিটি অনুযায়ী স্ট্রিম লিংক (.mp4 বা .m3u8)
-/// download = ডাউনলোডের জন্য সরাসরি .mp4 লিংক (না দিলে ডাউনলোড বন্ধ)
-class VideoSource {
-  final Map<String, String> streams;
-  final String? download;
-  final bool demo;
-  const VideoSource({required this.streams, this.download, this.demo = false});
-}
-
-/// নিজের বৈধ লিংক এখানে যোগ করো (key = TMDB movie id)।
-/// পরে এটা সার্ভার/ব্যাকএন্ড থেকে আসবে।
-const Map<int, VideoSource> kSources = {
-  // উদাহরণ:
-  // 603: VideoSource(
-  //   streams: {'480p': 'https://cdn.example.com/m480.mp4', '720p': 'https://cdn.example.com/m720.mp4'},
-  //   download: 'https://cdn.example.com/m720.mp4',
-  // ),
-};
-
-/// টেস্টের জন্য ওপেন/পাবলিক ডেমো ভিডিও (Blender Foundation ও সাধারণ টেস্ট স্ট্রিম)।
-const List<VideoSource> _demos = [
-  VideoSource(
-    demo: true,
-    streams: {
-      '360p':
-          'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4',
-      '720p':
-          'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_5MB.mp4',
-    },
-    download:
-        'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_5MB.mp4',
-  ),
-  VideoSource(
-    demo: true,
-    streams: {
-      'Auto':
-          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-    },
-    download:
-        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-  ),
-  VideoSource(
-    demo: true,
-    streams: {
-      'Auto':
-          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-    },
-    download:
-        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-  ),
-  VideoSource(
-    demo: true,
-    streams: {
-      'Auto':
-          'https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8',
-    },
-    // HLS (.m3u8) ডাউনলোড সাপোর্ট নেই, তাই download নেই
-  ),
-];
-
-VideoSource sourceFor(Movie m) => kSources[m.id] ?? _demos[m.id % _demos.length];
 
 === FILE: lib/downloads.dart ===
 import 'dart:async';
@@ -754,7 +722,6 @@ class DownloadManager extends ChangeNotifier {
 
   String pathOf(DownloadItem it) => '${_dir.path}/${it.fileName}';
 
-  /// ডাউনলোড শেষ হলে লোকাল ফাইলের পাথ, নাহলে null
   String? localPath(int id) {
     final it = items[id];
     if (it == null || it.status != DlStatus.done) return null;
@@ -867,7 +834,7 @@ class DownloadManager extends ChangeNotifier {
         await sink.close();
       }
       if (it.total > 0 && it.received < it.total) {
-        it.status = DlStatus.paused; // নেট কেটে গেছে, Resume করা যাবে
+        it.status = DlStatus.paused;
       } else {
         it.status = DlStatus.done;
       }
@@ -1048,6 +1015,7 @@ import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'core.dart';
+import 'sources.dart';
 
 class PlayerPage extends StatefulWidget {
   final String title;
@@ -1084,8 +1052,8 @@ class _PlayerPageState extends State<PlayerPage> {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     WakelockPlus.enable();
     if (widget.streams.isNotEmpty) {
-      _quality = widget.streams.containsKey('720p')
-          ? '720p'
+      _quality = widget.streams.containsKey('Auto')
+          ? 'Auto'
           : widget.streams.keys.first;
     }
     _open();
@@ -1104,16 +1072,22 @@ class _PlayerPageState extends State<PlayerPage> {
 
   Future<void> _open({Duration start = Duration.zero}) async {
     final local = widget.localPath;
-    final url = widget.streams[_quality];
-    if (local == null && url == null) {
+    var rawUrl = widget.streams[_quality];
+    if (local == null && rawUrl == null) {
       setState(() => _error = true);
       return;
     }
     setState(() => _error = false);
     final old = _c;
+
+    String targetUrl = rawUrl ?? '';
+    if (local == null && targetUrl.isNotEmpty) {
+      targetUrl = await getDirectVideoUrl(targetUrl);
+    }
+
     final c = local != null
         ? VideoPlayerController.file(File(local))
-        : VideoPlayerController.networkUrl(Uri.parse(url!));
+        : VideoPlayerController.networkUrl(Uri.parse(targetUrl));
     try {
       await c.initialize();
       if (!mounted) {
@@ -1240,7 +1214,6 @@ class _PlayerPageState extends State<PlayerPage> {
   Widget _controls(VideoPlayerController c) {
     final canPickQuality = widget.localPath == null && widget.streams.length > 1;
     return Stack(children: [
-      // Top bar
       Positioned(
         top: 0,
         left: 0,
@@ -1303,7 +1276,6 @@ class _PlayerPageState extends State<PlayerPage> {
           ]),
         ),
       ),
-      // Center buttons
       Center(
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           IconButton(
@@ -1331,7 +1303,6 @@ class _PlayerPageState extends State<PlayerPage> {
           ),
         ]),
       ),
-      // Bottom bar
       Positioned(
         left: 0,
         right: 0,
@@ -1399,7 +1370,7 @@ class DetailsPage extends StatefulWidget {
 }
 
 class _DetailsPageState extends State<DetailsPage> {
-  late Future<Map<String, dynamic>> _future;
+  late Future> _future;
   late final VideoSource _src;
 
   @override
@@ -1426,14 +1397,16 @@ class _DetailsPageState extends State<DetailsPage> {
     ));
   }
 
-  void _download() {
+  Future<void> _download() async {
     final m = widget.movie;
     final url = _src.download;
     if (url == null) {
       _msg('এই ভিডিও শুধু স্ট্রিম করা যাবে, ডাউনলোড নেই');
       return;
     }
-    DownloadManager.I.start(m.id, m.title, m.poster, url);
+    _msg('ডাউনলোড লিংক তৈরি হচ্ছে...');
+    final directUrl = await getDirectVideoUrl(url);
+    DownloadManager.I.start(m.id, m.title, m.poster, directUrl);
     _msg('ডাউনলোড শুরু হয়েছে');
   }
 
@@ -1499,7 +1472,7 @@ class _DetailsPageState extends State<DetailsPage> {
   Widget build(BuildContext context) {
     final m = widget.movie;
     return Scaffold(
-      body: FutureBuilder<Map<String, dynamic>>(
+      body: FutureBuilder>(
         future: _future,
         builder: (context, snap) {
           final d = snap.data;
@@ -1510,7 +1483,7 @@ class _DetailsPageState extends State<DetailsPage> {
                   .toList();
           final runtime = d == null ? 0 : ((d['runtime'] ?? 0) as int);
           final cast = d == null
-              ? <Map<String, dynamic>>[]
+              ? >[]
               : ((d['credits']?['cast'] ?? []) as List)
                   .take(12)
                   .map((e) => e as Map<String, dynamic>)
@@ -1597,14 +1570,6 @@ class _DetailsPageState extends State<DetailsPage> {
                           const SizedBox(width: 12),
                           Expanded(child: _downloadButton()),
                         ]),
-                    if (_src.demo)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 10),
-                        child: Text(
-                            'ডেমো ভিডিও (টেস্ট লিংক) — নিজের লিংক sources.dart-এ বসাও',
-                            style:
-                                TextStyle(color: Colors.white38, fontSize: 12)),
-                      ),
                     const SizedBox(height: 20),
                     const Text('Story',
                         style: TextStyle(
@@ -1665,7 +1630,6 @@ class _DetailsPageState extends State<DetailsPage> {
 
 === FILE: lib/update.dart ===
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
@@ -1674,7 +1638,6 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'core.dart';
 
-/// app.config থেকে GITHUB_REPO পড়ে (যেমন: username/cheetah)
 Future<String?> _readRepo() async {
   try {
     final t = await rootBundle.loadString('app.config');
@@ -1706,7 +1669,6 @@ bool _isNewer(String latest, String current) {
   return false;
 }
 
-/// GitHub Releases-এ নতুন ভার্সন থাকলে আপডেট ডায়ালগ দেখায়
 Future<void> checkForUpdate(BuildContext context) async {
   try {
     final repo = await _readRepo();
@@ -1758,4 +1720,3 @@ Future<void> checkForUpdate(BuildContext context) async {
     );
   } catch (_) {}
 }
-
