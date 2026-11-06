@@ -41,9 +41,121 @@ flutter_launcher_icons:
   ios: false
   image_path: "logo.png"
 
+=== FILE: lib/core.dart ===
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+const kOrange = Color(0xFFFF7A00);
+const kBlue = Color(0xFF00B4FF);
+const kBg = Color(0xFF0A0A0A);
+const kCard = Color(0xFF181818);
+
+const tmdbKey = String.fromEnvironment('TMDB_KEY');
+const imgBase = 'https://image.tmdb.org/t/p/';
+
+Future> tmdb(String path, [Map<String, String> q = const {}]) async {
+  final uri = Uri.https('api.themoviedb.org', '/3$path',
+      {'api_key': tmdbKey, 'language': 'en-US', ...q});
+  final r = await http.get(uri);
+  if (r.statusCode != 200) {
+    throw Exception('TMDB error ${r.statusCode}');
+  }
+  return json.decode(r.body) as Map<String, dynamic>;
+}
+
+class Movie {
+  final int id;
+  final String title;
+  final String? poster;
+  final String? backdrop;
+  final double rating;
+  final String year;
+  final String overview;
+
+  Movie({
+    required this.id,
+    required this.title,
+    required this.poster,
+    required this.backdrop,
+    required this.rating,
+    required this.year,
+    required this.overview,
+  });
+
+  factory Movie.fromJson(Map<String, dynamic> j) {
+    final date = (j['release_date'] ?? '') as String;
+    return Movie(
+      id: j['id'] as int,
+      title: (j['title'] ?? j['name'] ?? '') as String,
+      poster: j['poster_path'] as String?,
+      backdrop: j['backdrop_path'] as String?,
+      rating: ((j['vote_average'] ?? 0) as num).toDouble(),
+      year: date.length >= 4 ? date.substring(0, 4) : '',
+      overview: (j['overview'] ?? '') as String,
+    );
+  }
+}
+
+Future<List<Movie>> fetchMovies(String path, [Map<String, String> q = const {}]) async {
+  final d = await tmdb(path, q);
+  return (d['results'] as List)
+      .map((e) => Movie.fromJson(e as Map<String, dynamic>))
+      .where((m) => m.poster != null)
+      .toList();
+}
+
+=== FILE: lib/sources.dart ===
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'core.dart';
+
+class VideoSource {
+  final Map<String, String> streams;
+  final String? download;
+  final bool demo;
+  const VideoSource({required this.streams, this.download, this.demo = false});
+}
+
+Future<String> getDirectVideoUrl(String rawUrl) async {
+  if (rawUrl.isEmpty) return rawUrl;
+  final apiUri = Uri.parse('https://cheetah-bd.vercel.app/api/get-link?url=${Uri.encodeComponent(rawUrl)}');
+  try {
+    final res = await http.get(apiUri).timeout(const Duration(seconds: 10));
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      if (data['success'] == true && data['direct_url'] != null) {
+        return data['direct_url'];
+      }
+    }
+  } catch (_) {}
+  return rawUrl;
+}
+
+const Map<int, VideoSource> kSources = {};
+
+const List<VideoSource> _demos = [
+  VideoSource(
+    demo: true,
+    streams: {
+      '360p': 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4',
+      '720p': 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_5MB.mp4',
+    },
+    download: 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_5MB.mp4',
+  ),
+  VideoSource(
+    demo: true,
+    streams: {
+      'Auto': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+    },
+    download: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+  ),
+];
+
+VideoSource sourceFor(Movie m) => kSources[m.id] ?? _demos[m.id % _demos.length];
+
 === FILE: lib/main.dart ===
 import 'dart:async';
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -510,123 +622,6 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 }
-
-=== FILE: lib/core.dart ===
-import 'dart:convert';
-
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-
-const kOrange = Color(0xFFFF7A00);
-const kBlue = Color(0xFF00B4FF);
-const kBg = Color(0xFF0A0A0A);
-const kCard = Color(0xFF181818);
-
-const tmdbKey = String.fromEnvironment('TMDB_KEY');
-const imgBase = 'https://image.tmdb.org/t/p/';
-
-Future> tmdb(String path,
-    [Map<String, String> q = const {}]) async {
-  final uri = Uri.https('api.themoviedb.org', '/3$path',
-      {'api_key': tmdbKey, 'language': 'en-US', ...q});
-  final r = await http.get(uri);
-  if (r.statusCode != 200) {
-    throw Exception('TMDB error ${r.statusCode}');
-  }
-  return json.decode(r.body) as Map<String, dynamic>;
-}
-
-class Movie {
-  final int id;
-  final String title;
-  final String? poster;
-  final String? backdrop;
-  final double rating;
-  final String year;
-  final String overview;
-
-  Movie({
-    required this.id,
-    required this.title,
-    required this.poster,
-    required this.backdrop,
-    required this.rating,
-    required this.year,
-    required this.overview,
-  });
-
-  factory Movie.fromJson(Map<String, dynamic> j) {
-    final date = (j['release_date'] ?? '') as String;
-    return Movie(
-      id: j['id'] as int,
-      title: (j['title'] ?? j['name'] ?? '') as String,
-      poster: j['poster_path'] as String?,
-      backdrop: j['backdrop_path'] as String?,
-      rating: ((j['vote_average'] ?? 0) as num).toDouble(),
-      year: date.length >= 4 ? date.substring(0, 4) : '',
-      overview: (j['overview'] ?? '') as String,
-    );
-  }
-}
-
-Future<List<Movie>> fetchMovies(String path,
-    [Map<String, String> q = const {}]) async {
-  final d = await tmdb(path, q);
-  return (d['results'] as List)
-      .map((e) => Movie.fromJson(e as Map<String, dynamic>))
-      .where((m) => m.poster != null)
-      .toList();
-}
-
-=== FILE: lib/sources.dart ===
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'core.dart';
-
-class VideoSource {
-  final Map<String, String> streams;
-  final String? download;
-  final bool demo;
-  const VideoSource({required this.streams, this.download, this.demo = false});
-}
-
-/// Vercel Cloud Extractor API Call
-Future<String> getDirectVideoUrl(String rawUrl) async {
-  if (rawUrl.isEmpty) return rawUrl;
-  final apiUri = Uri.parse('https://cheetah-bd.vercel.app/api/get-link?url=${Uri.encodeComponent(rawUrl)}');
-  try {
-    final res = await http.get(apiUri).timeout(const Duration(seconds: 10));
-    if (res.statusCode == 200) {
-      final data = jsonDecode(res.body);
-      if (data['success'] == true && data['direct_url'] != null) {
-        return data['direct_url'];
-      }
-    }
-  } catch (_) {}
-  return rawUrl;
-}
-
-const Map<int, VideoSource> kSources = {};
-
-const List<VideoSource> _demos = [
-  VideoSource(
-    demo: true,
-    streams: {
-      '360p': 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4',
-      '720p': 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_5MB.mp4',
-    },
-    download: 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_5MB.mp4',
-  ),
-  VideoSource(
-    demo: true,
-    streams: {
-      'Auto': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-    },
-    download: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-  ),
-];
-
-VideoSource sourceFor(Movie m) => kSources[m.id] ?? _demos[m.id % _demos.length];
 
 === FILE: lib/downloads.dart ===
 import 'dart:async';
@@ -1648,7 +1643,6 @@ class _DetailsPageState extends State<DetailsPage> {
 
 === FILE: lib/update.dart ===
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
